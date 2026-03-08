@@ -1,40 +1,39 @@
 # ------------------------------
-# Étape 1 : Construction du JAR
+# Étape 1 : Construction du WAR avec Ant
 # ------------------------------
-FROM maven:3.8.7-eclipse-temurin-17 AS builder
+FROM eclipse-temurin:17-jdk-jammy AS builder
 
-# Dossier de travail
+# Installation d'Ant (outil de build)
+RUN apt-get update && apt-get install -y ant && rm -rf /var/lib/apt/lists/*
+
+# Définir le répertoire de travail
 WORKDIR /app
 
-# 1. Copie uniquement le pom.xml pour profiter du cache Docker
-COPY pom.xml .
-# Téléchargement des dépendances (sans compiler)
-RUN mvn dependency:go-offline -B
-
-# 2. Copie du code source
+# Copier les fichiers sources nécessaires au build
+COPY build.xml .
+COPY nbproject ./nbproject
 COPY src ./src
+COPY web ./web
 
-# 3. Compilation et packaging (sans les tests pour accélérer)
-RUN mvn clean package -DskipTests
+# IMPORTANT : Si ton projet a des dépendances externes (JARs) dans un dossier lib/, décommente la ligne suivante :
+# COPY lib ./lib
+
+# Lancer le build Ant (cible "dist" générant le WAR dans dist/)
+RUN ant clean dist
 
 # ------------------------------
-# Étape 2 : Image d'exécution légère
+# Étape 2 : Image d'exécution avec Tomcat
 # ------------------------------
-FROM eclipse-temurin:17-jre-jammy
+FROM tomcat:9-jdk17
 
-# Création d'un utilisateur non‑root pour la sécurité
-RUN addgroup --system --gid 1001 appuser && \
-    adduser --system --uid 1001 --gid 1001 appuser
-USER appuser
+# Supprimer les applications web par défaut de Tomcat
+RUN rm -rf /usr/local/tomcat/webapps/*
 
-# Dossier de travail
-WORKDIR /app
+# Copier le WAR depuis l'étape de build et le déposer en tant qu'application racine (ROOT.war)
+COPY --from=builder /app/dist/*.war /usr/local/tomcat/webapps/ROOT.war
 
-# Copie du JAR depuis l'étape précédente
-COPY --from=builder /app/target/*.jar app.jar
-
-# Exposition du port par défaut de Spring Boot
+# Exposer le port par défaut de Tomcat
 EXPOSE 8080
 
-# Commande de démarrage
-ENTRYPOINT ["java", "-jar", "app.jar"]
+# Démarrer Tomcat
+CMD ["catalina.sh", "run"]
