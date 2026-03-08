@@ -1,13 +1,14 @@
-# On utilise l'image officielle de Tomcat 9
-FROM tomcat:9.0-jdk17-openjdk-slim
+FROM tomcat:9-jdk17-temurin-jammy
 
-# On nettoie les dossiers par défaut
+# 1. On nettoie Tomcat
 RUN rm -rf /usr/local/tomcat/webapps/*
 
-# On copie ton fichier .war déjà compilé
-# (Remplace 'MonProjet.war' par le vrai nom de ton fichier dans le dossier dist)
-COPY dist/*.war /usr/local/tomcat/webapps/ROOT.war
+# 2. On copie TOUT ton projet dans le dossier webapps de Tomcat
+# On utilise le dossier 'web' qui contient tes pages JSP et tes libs
+COPY web/ /usr/local/tomcat/webapps/ROOT/
+
+# 3. Si tu as des JARs (PDFBox, POI) dans un dossier lib, on les ajoute
+COPY lib/*.jar /usr/local/tomcat/webapps/ROOT/WEB-INF/lib/
 
 EXPOSE 8080
-
 CMD ["catalina.sh", "run"]
