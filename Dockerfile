@@ -1,10 +1,17 @@
 # ------------------------------
-# Étape 1 : Construction du WAR avec Ant
+# Étape 1 : Construction du WAR avec Ant et Tomcat
 # ------------------------------
 FROM eclipse-temurin:17-jdk-jammy AS builder
 
-# Installation d'Ant (outil de build)
-RUN apt-get update && apt-get install -y ant && rm -rf /var/lib/apt/lists/*
+# Installation d'Ant et de wget (pour télécharger Tomcat)
+RUN apt-get update && apt-get install -y ant wget && rm -rf /var/lib/apt/lists/*
+
+# Télécharger et extraire Tomcat 9 (pour les bibliothèques J2EE)
+ENV TOMCAT_VERSION=9.0.89
+RUN wget -q https://archive.apache.org/dist/tomcat/tomcat-9/v${TOMCAT_VERSION}/bin/apache-tomcat-${TOMCAT_VERSION}.tar.gz && \
+    tar xzf apache-tomcat-${TOMCAT_VERSION}.tar.gz -C /opt && \
+    rm apache-tomcat-${TOMCAT_VERSION}.tar.gz && \
+    ln -s /opt/apache-tomcat-${TOMCAT_VERSION} /opt/tomcat
 
 # Définir le répertoire de travail
 WORKDIR /app
@@ -15,11 +22,11 @@ COPY nbproject ./nbproject
 COPY src ./src
 COPY web ./web
 
-# IMPORTANT : Si ton projet a des dépendances externes (JARs) dans un dossier lib/, décommente la ligne suivante :
+# Si ton projet a des dépendances externes (JARs) dans un dossier lib/, décommente la ligne suivante :
 # COPY lib ./lib
 
-# Lancer le build Ant (cible "dist" générant le WAR dans dist/)
-RUN ant clean dist
+# Lancer le build Ant en pointant vers le répertoire Tomcat
+RUN ant clean dist -Dj2ee.server.home=/opt/tomcat
 
 # ------------------------------
 # Étape 2 : Image d'exécution avec Tomcat
