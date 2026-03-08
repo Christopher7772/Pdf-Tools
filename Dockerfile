@@ -1,49 +1,72 @@
-# ------------------------------
-# Étape 1 : Construction du WAR (Builder)
-# ------------------------------
+# ==============================================================================
+# ÉTAPE 1 : BUILDER (Compilation)
+# ==============================================================================
 FROM eclipse-temurin:17-jdk-jammy AS builder
 
-# Installation d'Ant et wget
-RUN apt-get update && apt-get install -y ant wget && rm -rf /var/lib/apt/lists/*
+# Documentation et métadonnées
+LABEL maintainer="Professional Dev"
+LABEL description="Java Web App - Builder Stage"
 
-# 1. Téléchargement de Tomcat 9 (pour les APIs Servlet/JSP)
+# Variables pour faciliter les mises à jour
+ENV ANT_VERSION=1.10.14
 ENV TOMCAT_VERSION=9.0.89
-RUN wget -q https://archive.apache.org/dist/tomcat/tomcat-9/v${TOMCAT_VERSION}/bin/apache-tomcat-${TOMCAT_VERSION}.tar.gz && \
-    tar xzf apache-tomcat-${TOMCAT_VERSION}.tar.gz -C /opt && \
-    rm apache-tomcat-${TOMCAT_VERSION}.tar.gz && \
-    ln -s /opt/apache-tomcat-${TOMCAT_VERSION} /opt/tomcat
+ENV COPYLIBS_VERSION=RELEASE120
 
-# 2. TÉLÉCHARGEMENT AUTOMATIQUE de CopyLibs (NetBeans)
-# On récupère directement le JAR depuis Maven Central pour éviter l'erreur "File not found"
-RUN wget -q -O /tmp/copylibstask.jar https://repo1.maven.org/maven2/org/netbeans/modules/org-netbeans-modules-java-j2seproject-copylibstask/RELEASE220/org-netbeans-modules-java-j2seproject-copylibstask-RELEASE220.jar
+# Installation optimisée : Ant, wget et certificats (pour éviter les erreurs SSL)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ant \
+    wget \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# 1. Préparation de l'environnement Tomcat pour Ant
+RUN wget -q https://archive.apache.org/dist/tomcat/tomcat-9/v${TOMCAT_VERSION}/bin/apache-tomcat-${TOMCAT_VERSION}.tar.gz \
+    && tar xzf apache-tomcat-${TOMCAT_VERSION}.tar.gz -C /opt \
+    && ln -s /opt/apache-tomcat-${TOMCAT_VERSION} /opt/tomcat \
+    && rm apache-tomcat-${TOMCAT_VERSION}.tar.gz
+
+# 2. Téléchargement du JAR CopyLibs (Version stable corrigée)
+RUN wget -q --no-check-certificate -O /tmp/copylibstask.jar \
+    https://repo1.maven.org/maven2/org/netbeans/modules/org-netbeans-modules-java-j2seproject-copylibstask/${COPYLIBS_VERSION}/org-netbeans-modules-java-j2seproject-copylibstask-${COPYLIBS_VERSION}.jar
 
 WORKDIR /app
 
-# Copie des fichiers de configuration et sources
+# 3. Optimisation du cache Docker : on copie les dépendances AVANT le code source
+# Si vous ne modifiez pas vos JARs, Docker sautera cette étape lors du prochain build
+COPY lib/ ./lib/
+COPY nbproject/ ./nbproject/
 COPY build.xml .
-COPY nbproject ./nbproject
-COPY src ./src
-COPY web ./web
 
-# IMPORTANT : Assurez-vous que ce dossier 'lib' existe sur votre PC avec vos JARs (POI, PDFBox, etc.)
-COPY lib ./lib
+# 4. Copie du code source
+COPY src/ ./src/
+COPY web/ ./web/
 
-# Lancement de la compilation
-# On utilise le JAR téléchargé dans /tmp/
+# 5. Compilation
 RUN ant clean dist \
     -Dj2ee.server.home=/opt/tomcat \
     -Dlibs.CopyLibs.classpath=/tmp/copylibstask.jar
 
-# ------------------------------
-# Étape 2 : Image finale (Exécution)
-# ------------------------------
-FROM tomcat:9-jdk17
+# ==============================================================================
+# ÉTAPE 2 : RUNNER (Exécution)
+# ==============================================================================
+FROM tomcat:9-jdk17-temurin-jammy
 
-# Nettoyage de l'instance Tomcat par défaut
-RUN rm -rf /usr/local/tomcat/webapps/*
+LABEL description="Java Web App - Execution Stage"
 
-# Récupération du fichier WAR généré à l'étape précédente
-COPY --from=builder /app/dist/*.war /usr/local/tomcat/webapps/ROOT.war
+WORKDIR /usr/local/tomcat
+
+# Nettoyage pro des applications par défaut
+RUN rm -rf webapps/*
+
+# Copie sécurisée du WAR depuis le builder
+COPY --from=builder /app/dist/*.war webapps/ROOT.war
+
+# Configuration de l'environnement de production
+ENV JAVA_OPTS="-Xms512m -Xmx1024m -Dfile.encoding=UTF-8"
+
+# Optionnel : Ajout d'un Healthcheck pour surveiller l'état de l'app
+HEALTHCHECK --interval=30s --timeout=3s \
+  CMD wget --quiet --tries=1 --spider http://localhost:8080/ || exit 1
 
 EXPOSE 8080
 
